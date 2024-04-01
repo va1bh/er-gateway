@@ -1,0 +1,212 @@
+DEP="depend/"
+LP=$DEP"loraserver_offline/"
+APA=$DEP"apache2_php/"
+APT_CAC="/var/cache/apt/archives/"
+ER="er550-fm-trap-watch-imx6-web/"
+UI=$ER"html/"
+BG=$ER"bg/"
+BG_DEST="/opt/fm-trap-watch"
+UI_DEST="/var/www/html"
+TCP_APP="/opt/er_lora_server_tcp/"
+VERN_MQ=$DEP"vernemq/"
+
+echo "Stopping services..."
+sudo service apache2 stop
+sudo service loraserver stop
+sudo service lora-gateway-bridge stop
+sudo service lora-app-server stop
+sudo service apache2 stop
+
+sudo service ERLoraServer stop
+sudo service rc-local stop
+sudo systemctl stop instaAlertService
+sudo systemctl stop summaryAlertService
+sudo systemctl stop valveInstaAlertService
+sudo systemctl stop valveSummaryAlertService
+
+
+sudo pkill -9 FMDataCleaner
+sudo pkill -9 FMTrapGen
+sudo pkill -9 FMLoopStarter
+sudo pkill -9 FMValveGen
+sudo pkill -9 LeakReportGen
+sudo pkill -9 php
+echo "Removing existing installations..."
+sudo apt remove --purge loraserver lora-gateway-bridge lora-app-server -y
+sudo rm -rf /etc/loraserver
+sudo rm -rf /etc/lora-app-server
+sudo rm -rf /etc/lora-gateway-bridge
+sudo apt remove --purge postgres* -y
+sudo systemctl disable mosquitto
+sudo apt remove --purge mosquitto* -y
+sudo apt remove --purge chirpstack* -y
+sudo apt remove --purge apache2* -y
+sudo apt remove --purge php* -y
+sudo apt remove --purge redis* -y
+sudo rm -v /var/lib/redis/dump.rdb
+sudo rm -v /var/lib/redis/appendonly.aof
+sudo apt autoclean
+sudo rm -rf $BG_DEST
+sudo rm -rf $UI_DEST
+
+
+#Start
+echo "Deploying TCP LoRa Server..."
+sudo apt update
+## Amol
+sudo apt-get install php-zip -y
+
+    ##node --v
+    ##node: /lib/x86_64-linux-gnu/libc.so.6: version `GLIBC_2.28' not found (required by node)
+    ##glibc: https://linuxier.com/how-to-install-glibc-on-ubuntu/
+    #sudo apt-get remove nodejs
+    #nvm install 16.15.1
+sudo apt install nodejs npm -y
+tar -xf er_lora_server_tcp.tar.xz
+cd er_lora_server_tcp/
+npm install
+sudo cp ERLoraServer.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable ERLoraServer.service
+cd ..
+sudo cp -r er_lora_server_tcp/ /opt/ 
+# Amol
+# cp -r er_lora_server_tcp /opt/
+echo "Updating repo..."
+sudo tar -xf depend.tar.xz
+cd $LP
+sudo bash deploy.sh
+cd ../../
+#echo $PWD
+sudo cp $APA*.deb $APT_CAC
+
+    ##*Cannot install php7.2-dev 
+    The following packages have unmet dependencies:
+#  libssl-dev : Depends: libssl1.1 (= 1.1.0g-2ubuntu4) but 1.1.1-1ubuntu2.1~18.04.20 is to be installed
+#               Recommends: libssl-doc but it is not going to be installed
+
+    #apache2 ->
+    #sudo apt update
+    #sudo apt install apache2
+    #refer - https://pixelspress.com/how-to-install-php-7-2-on-ubuntu-16-04-18-04-18-10/
+
+    ##**sudo apt remove libssl1.1
+    #check apache server status now
+    #sudo apachectl status
+    
+sudo apt install apache2 php7.2 libapache2-mod-php7.2 php7.2-pgsql php-pear php7.2-dev -y
+sudo apt install libmosquitto-dev -y
+
+
+    #pear installation
+    # https://mosquitto.org/download/
+
+sudo pear install $APA"Mosquitto-0.4.0.tgz"
+#tar.gz needs to extract
+sudo rm $APT_CAC*.deb
+sudo pecl install Mosquitto-alpha
+
+#new commands
+cd $VERN_MQ 
+echo "VerneMQ installation"
+sudo apt-get install libsnappy1v5
+sudo dpkg -i vernemq-1.10.4.1.bionic.x86_64.deb
+sudo apt install -f -y
+dpkg -s vernemq | grep Status
+sudo service vernemq stop
+sudo cp *.conf /etc/vernemq/
+sudo cp *.acl /etc/vernemq/
+echo "Starting VerneMQ"
+sudo service vernemq start
+echo "VerneMQ started"
+echo $(pwd)
+cd ../../
+
+# Amol
+sudo chmod 666 /etc/php/7.2/cli/php.ini
+# Amol
+sudo chmod 666 /etc/php/7.2/apache2/php.ini
+
+sudo echo "extension=mosquitto.so" >> /etc/php/7.2/cli/php.ini
+sudo echo "extension=mosquitto.so" >> /etc/php/7.2/apache2/php.ini
+sudo service apache2 stop
+sudo service apache2 start
+echo "Apache and PHP installed..."
+
+sudo mkdir /opt/wi_hart_modbus
+sudo chmod -R 777 /opt/wi_hart_modbus/
+tar -xf Modbus_Src.tar.xz
+cd Modbus_Src/
+# npm install
+sudo cp wiHartModbus.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable wiHartModbus.service
+cd ..
+sudo cp -r Modbus_Src/* /opt/wi_hart_modbus/
+sudo chmod 777 /opt/wi_hart_modbus/inputRegs.csv
+# cp -r er_lora_server_tcp /opt/
+# echo "Updating repo..."
+
+sudo apt install software-properties-common -y
+sudo apt install gcc make libpq-dev -y
+sudo add-apt-repository ppa:deadsnakes/ppa -y -u
+sudo apt install python3.6 python3.6-dev -y 
+sudo apt install python3-pip -y
+python3.6 -m pip install psycopg2
+python3.6 -m pip install numpy
+python3.6 -m pip install pandas
+python3.6 -m pip install pyModbusTCP
+python3.6 -m pip install paho-mqtt
+
+
+sudo rm -rf depend
+tar -xf UI.tar.xz
+cd $UI && sudo bash deploy.sh
+cd ../../
+sudo mkdir $BG_DEST
+cd $BG
+sudo cp instaAlertService.service /etc/systemd/system/
+sudo cp summaryAlertService.service /etc/systemd/system/
+sudo cp valveInstaAlertService.service /etc/systemd/system/
+sudo cp valveSummaryAlertService.service /etc/systemd/system/
+sudo cp trapsPageManager.service /etc/systemd/system/
+sudo cp -R * $BG_DEST"/"
+cd ..
+echo "oo"
+#pwd
+echo "oo"
+cd ..
+sudo rm -rf $ER
+cd $BG_DEST"/"
+#Amol did not find csv
+sudo chmod 777 csvfile.php /var/www/html
+sudo apt install nodejs npm -y
+sudo npm install pg
+sudo npm install nodemailer
+sudo systemctl daemon-reload
+# sudo systemctl enable instaAlertService.service
+# sudo systemctl enable summaryAlertService.service
+# sudo systemctl enable valveInstaAlertService.service
+# sudo systemctl enable valveSummaryAlertService.service
+sudo systemctl enable trapsPageManager.service
+sudo gcc FMTrapGen.c -o FMTrapGen
+sudo gcc FMDataCleaner.c -o FMDataCleaner
+sudo gcc FMLoopStarter.c -o FMLoopStarter
+sudo gcc FMServiceRestarter.c -o FMServiceRestarter
+sudo gcc LeakReportGen.c -o LeakReportGen
+sudo gcc FMValveGen.c -o FMValveGen
+sudo cp redis.conf /etc/redis/redis.conf
+sudo chmod 777 /etc/redis/redis.conf
+sudo cp rc.local /etc/rc.local
+sudo chmod 755 /etc/rc.local
+sudo service rc-local stop
+sudo service rc-local start
+#sudo service anydesk stop
+#sudo apt purge anydesk
+sudo apt install nmap -y
+echo "."
+echo "FM App deployed..."
+echo "."
+sleep 3
+sudo reboot now
+
